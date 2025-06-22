@@ -16,6 +16,9 @@
         <header class="flex justify-between items-center mb-6">
             <h1 class="text-2xl font-bold">The Life Care</h1>
             <div class="flex space-x-3">
+                <button id="adminToggle" class="bg-green-600 px-3 py-1 rounded hidden">
+                    <i class="fas fa-user-cog"></i>
+                </button>
                 <button id="cartBtn" class="relative">
                     <i class="fas fa-shopping-cart text-xl"></i>
                     <span id="cartCount" class="hidden absolute -top-2 -right-2 bg-blue-500 text-xs rounded-full h-5 w-5 flex items-center justify-center">0</span>
@@ -27,12 +30,29 @@
         </header>
 
         <main>
-            <div class="mb-4 relative">
-                <input id="searchInput" type="text" placeholder="Search medicines..." class="w-full bg-gray-800 px-4 py-2 rounded-lg">
-                <button id="searchBtn" class="absolute right-3 top-2"><i class="fas fa-search"></i></button>
+            <div id="userView">
+                <div class="mb-4 relative">
+                    <input id="searchInput" type="text" placeholder="Search medicines..." class="w-full bg-gray-800 px-4 py-2 rounded-lg">
+                    <button id="searchBtn" class="absolute right-3 top-2"><i class="fas fa-search"></i></button>
+                </div>
+                <div id="products" class="grid grid-cols-2 gap-4"></div>
             </div>
 
-            <div id="products" class="grid grid-cols-2 gap-4"></div>
+            <div id="adminView" class="hidden">
+                <h2 class="text-xl font-bold mb-4">Admin Panel</h2>
+                <div class="bg-gray-800 p-4 rounded-lg">
+                    <h3 class="font-bold mb-3">Add New Medicine</h3>
+                    <form id="productForm" class="space-y-3">
+                        <input id="productName" type="text" placeholder="Medicine Name" required class="w-full bg-gray-700 px-3 py-2 rounded">
+                        <textarea id="productDesc" placeholder="Description" class="w-full bg-gray-700 px-3 py-2 rounded"></textarea>
+                        <input id="productPrice" type="number" placeholder="Price (₹)" required class="w-full bg-gray-700 px-3 py-2 rounded">
+                        <input id="productImage" type="file" accept="image/*" class="w-full">
+                        <button type="submit" class="w-full bg-blue-600 py-2 rounded-lg">
+                            <i class="fas fa-plus mr-2"></i>Add Product
+                        </button>
+                    </form>
+                </div>
+            </div>
         </main>
 
         <div id="chatBox" class="fixed bottom-0 right-0 w-full max-w-sm bg-gray-800 rounded-t-lg shadow-xl transform translate-y-full transition-transform">
@@ -81,12 +101,26 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         const auth = firebase.auth();
+        const storage = firebase.storage();
         
         let cart = JSON.parse(localStorage.getItem('cart')) || [];
+        let currentUser = null;
+        let username = 'User' + Math.floor(Math.random() * 1000);
         
-        auth.signInAnonymously().catch(error => {
+        auth.signInAnonymously().then(cred => {
+            currentUser = cred.user;
+            checkAdmin(cred.user.uid);
+        }).catch(error => {
             console.error("Auth error:", error);
         });
+        
+        function checkAdmin(uid) {
+            db.ref('admins/' + uid).once('value').then(snap => {
+                if (snap.exists()) {
+                    document.getElementById('adminToggle').classList.remove('hidden');
+                }
+            });
+        }
         
         function loadProducts() {
             db.ref('products').on('value', snapshot => {
@@ -186,6 +220,48 @@
             });
         }
         
+        document.getElementById('adminToggle').addEventListener('click', () => {
+            document.getElementById('userView').classList.toggle('hidden');
+            document.getElementById('adminView').classList.toggle('hidden');
+        });
+        
+        document.getElementById('productForm').addEventListener('submit', e => {
+            e.preventDefault();
+            const name = document.getElementById('productName').value;
+            const desc = document.getElementById('productDesc').value;
+            const price = parseFloat(document.getElementById('productPrice').value);
+            const image = document.getElementById('productImage').files[0];
+            
+            if (!name || !price) return alert('Name and price are required');
+            
+            const productData = { name, description: desc, price };
+            
+            if (image) {
+                const storageRef = storage.ref('products/' + Date.now());
+                storageRef.put(image).then(snap => {
+                    return snap.ref.getDownloadURL();
+                }).then(url => {
+                    productData.imageUrl = url;
+                    saveProduct(productData);
+                }).catch(err => {
+                    console.error("Upload error:", err);
+                    saveProduct(productData);
+                });
+            } else {
+                saveProduct(productData);
+            }
+        });
+        
+        function saveProduct(product) {
+            db.ref('products').push(product).then(() => {
+                alert('Product added!');
+                document.getElementById('productForm').reset();
+            }).catch(err => {
+                console.error("Save error:", err);
+                alert('Error adding product');
+            });
+        }
+        
         document.getElementById('cartBtn').addEventListener('click', () => {
             document.getElementById('cartPanel').classList.remove('hidden');
         });
@@ -217,10 +293,14 @@
             if (!msg) return;
             
             const chat = document.getElementById('chatMessages');
+            const timestamp = new Date().toLocaleTimeString();
+            
             chat.innerHTML += `
                 <div class="mb-3 text-right">
-                    <div class="inline-block bg-blue-600 rounded-lg px-3 py-1">
+                    <div class="inline-block bg-blue-600 rounded-lg px-3 py-1 max-w-xs">
+                        <p class="text-xs text-blue-200">${username}</p>
                         <p>${msg}</p>
+                        <p class="text-xs text-blue-200 text-right">${timestamp}</p>
                     </div>
                 </div>
             `;
@@ -231,8 +311,10 @@
             setTimeout(() => {
                 chat.innerHTML += `
                     <div class="mb-3 text-left">
-                        <div class="inline-block bg-gray-700 rounded-lg px-3 py-1">
+                        <div class="inline-block bg-gray-700 rounded-lg px-3 py-1 max-w-xs">
+                            <p class="text-xs text-gray-400">Pharmacist</p>
                             <p>Thanks for your message. We'll respond soon.</p>
+                            <p class="text-xs text-gray-400">${new Date().toLocaleTimeString()}</p>
                         </div>
                     </div>
                 `;
@@ -260,4 +342,4 @@
         loadProducts();
     </script>
 </body>
-</html>
+    </html>
